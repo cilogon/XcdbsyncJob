@@ -179,7 +179,7 @@ class XcdbsyncJob extends CoJobBackend {
     $synchronized = $result['synchronized'];
     $failed = $result['failed'];
     $status = $result['status'];
-    $summary = "Successfully synchronized $synchronized records and recored $failed failures";
+    $summary = "Successfully synchronized $synchronized records and recorded $failed failures";
 
     $CoJob->finish($CoJob->id, $summary, $status);
   }
