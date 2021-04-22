@@ -109,7 +109,154 @@ class XcdbsyncJob extends CoJobBackend {
   }
 
   /**
-   * Create the top level WBS 2.0 COU.
+   * Create the WBS Jira groups.
+   *
+   * @return void
+   */
+  public function createWbsJiraGroups() {
+
+    $wbsCouStructureFile = fopen("../local/wbs_cou_structure.txt", "r");
+    while(!feof($wbsCouStructureFile)) {
+      $wbsCouStructureLine = trim(fgets($wbsCouStructureFile));
+
+      // Skip lines beginning with hash character.
+      if(substr($wbsCouStructureLine, 0, 1) == "#") {
+        continue;
+      }
+
+      // Skip empty lines.
+      if(empty($wbsCouStructureLine)) {
+        continue;
+      }
+
+      $wbsCouInputs = explode(";", $wbsCouStructureLine);
+
+      $couName = $wbsCouInputs[0];
+      $couDescription = $wbsCouInputs[1];
+      $couParentName = $wbsCouInputs[2];
+
+      $groupName = "Jira " . $couName;
+
+      $args = array();
+      $args['conditions']['CoGroup.name'] = $groupName;
+      $args['contain'] = false;
+
+      $group = $this->CoJob->Co->CoGroup->find('first', $args);
+
+      if(empty($group)) {
+        // Begin a transaction.
+        $dataSource = $this->CoJob->getDataSource();
+        $dataSource->begin();
+
+        // Create the Jira WBS group.
+        $this->CoJob->Co->CoGroup->clear();
+
+        $data = array();
+        $data['CoGroup']['co_id'] = $this->coId;
+        $data['CoGroup']['name'] = $groupName;
+        $data['CoGroup']['description'] = $groupName;
+        $data['CoGroup']['open'] = false;
+        $data['CoGroup']['status'] = SuspendableStatusEnum::Active;
+        $data['CoGroup']['group_type'] = GroupEnum::Standard;
+
+        if(!$this->CoJob->Co->CoGroup->save($data)) {
+          $this->log("Failed to save the Jira WBS group" . print_r($data, true));
+          $dataSource->rollback();
+          continue;
+        }
+
+        $targetGroupId = $this->CoJob->Co->CoGroup->id;
+
+        // Create the nesting.
+        $activeGroupName = "CO:COU:" . $couName . ":members:active";
+        $args = array();
+        $args['conditions']['CoGroup.name'] = $activeGroupName;
+        $args['conditions']['CoGroup.group_type'] = GroupEnum::ActiveMembers;
+        $args['contain'] = false;
+
+        $activeGroup = $this->CoJob->Co->CoGroup->find('first', $args);
+
+        if(empty($activeGroup)) {
+          $this->log("Could not find COU active group $activeGroupName");
+          $dataSource->rollback();
+          continue;
+        }
+
+        $this->CoJob->Co->CoGroup->CoGroupNesting->clear();
+
+        $data = array();
+        $data['CoGroupNesting']['co_group_id'] = $activeGroup['CoGroup']['id'];
+        $data['CoGroupNesting']['target_co_group_id'] = $targetGroupId;
+
+        if(!$this->CoJob->Co->CoGroup->CoGroupNesting->save($data)) {
+          $this->log("Failed to create nesting " . print_r($data, true));
+          $dataSource->rollback();
+          continue;
+        }
+        
+        // Add the Jira Group identifier.
+        $this->CoJob->Co->CoGroup->Identifier->clear();
+
+        $data = array();
+        $data['Identifier'] = array();
+        $data['Identifier']['identifier'] = $couName;
+        $data['Identifier']['type'] = 'jiragroupname';
+        $data['Identifier']['status'] = SuspendableStatusEnum::Active;
+        $data['Identifier']['co_group_id'] = $targetGroupId;
+
+        $args = array();
+        $args['validate'] = false;
+
+        if(!$this->CoJob->Co->CoGroup->Identifier->save($data, $args)) {
+          $this->log("ERROR could not create Identifier for CoGroup " . print_r($data, true));
+          $dataSource->rollback();
+          continue;
+        }
+
+        $dataSource->commit();
+        $this->log("Created Group $groupName");
+      } else {
+        $this->log("Group $groupName already exists");
+      }
+    }
+
+    fclose($wbsCouStructureFile);
+  }
+
+  /**
+   * Create the Jira Group Name extended type.
+   *
+   * @return void
+   */
+  public function createJiraGroupNameExtendedType() {
+    $args = array();
+    $args['conditions']['CoExtendedType.co_id'] = $this->coId;
+    $args['conditions']['CoExtendedType.attribute'] = 'Identifier.type';
+    $args['conditions']['CoExtendedType.name'] = 'jiragroupname';
+    $args['contain'] = false;
+
+    $exType = $this->CoJob->Co->CoExtendedType->find("first", $args);
+    if(!empty($exType)) {
+      $this->log("Jira Group Name extended type exists");
+      return;
+    }
+
+    $this->CoJob->Co->CoExtendedType->clear();
+
+    $data = array();
+    $data['CoExtendedType']['co_id'] = $this->coId;
+    $data['CoExtendedType']['attribute'] = 'Identifier.type';
+    $data['CoExtendedType']['name'] = 'jiragroupname';
+    $data['CoExtendedType']['display_name'] = 'Name of Group in Jira';
+    $data['CoExtendedType']['status'] = SuspendableStatusEnum::Active;
+
+    if(!$this->CoJob->Co->CoExtendedType->save($data)) {
+      $this->log("Failed to save the Jira Group Name extended type " . print_r($data, true));
+    }
+  }
+
+  /**
+   * Create the XSEDE Username extended type.
    *
    * @return void
    */
@@ -160,14 +307,20 @@ class XcdbsyncJob extends CoJobBackend {
     // Bootstrap if so configured.
     $bootstrap = Configure::read('XcdbsyncJob.bootstrap');
     if($bootstrap) {
+      // Create the XSEDE Username extended type if not present.
+      $this->createXsedeUsernameExtendedType();
+
+      // Create the Jira Group Name extended type if not present.
+      $this->createJiraGroupNameExtendedType();
+
       // Create the top level WBS COU if not present.
       $this->createWbs20Cou();
 
       // Create the WBS COU structure if not present.
       $this->createWbsCousAndDepartments();
 
-      // Create the XSEDE Username extended type if not present.
-      $this->createXsedeUsernameExtendedType();
+      // Create the WBS Jira groups if not present.
+      $this->createWbsJiraGroups(); 
 
       // Process XSEDE username to WBS mapping file.
       $this->processBootstrapFile();  
@@ -520,11 +673,19 @@ class XcdbsyncJob extends CoJobBackend {
       curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 
       $response = curl_exec($ch);
+      $curlReturnCode = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
 
       curl_close($ch);
 
       if($response === false) {
         $jobHistoryComment = "Unable to query XDCDB userinfo endpoint";
+        $this->CoJob->CoJobHistoryRecord->record($this->CoJob->id, $jobHistoryRecordKey, $jobHistoryComment, $coPersonId, null, JobStatusEnum::Failed);
+        $failed++;
+        continue;
+      }
+
+      if($curlReturnCode != 200) {
+        $jobHistoryComment = "Query to XDCDB userinfo endpoint returned code $curlReturnCode";
         $this->CoJob->CoJobHistoryRecord->record($this->CoJob->id, $jobHistoryRecordKey, $jobHistoryComment, $coPersonId, null, JobStatusEnum::Failed);
         $failed++;
         continue;
