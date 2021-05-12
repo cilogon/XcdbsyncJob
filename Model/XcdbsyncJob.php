@@ -677,7 +677,7 @@ class XcdbsyncJob extends CoJobBackend {
 
       $headers = array();
       $headers[] = 'XA-AGENT: userinfo';
-      $headers[] = 'XA-RESOURCE: registry-dev.xsede.org';
+      $headers[] = 'XA-RESOURCE: ' . Configure::read('XcdbsyncJob.xdcdb.apiresource');
       $headers[] = 'XA-API-KEY: ' .  Configure::read('XcdbsyncJob.xdcdb.apikey');
       curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 
