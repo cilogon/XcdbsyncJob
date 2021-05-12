@@ -61,6 +61,10 @@ class XcdbsyncJob extends CoJobBackend {
 
       if($couId === false) {
         $couParentId = array_search($couParentName, $currentCous);
+        if($couParentId === false) {
+          $this->log("Could not find COU parent ID");
+          continue;
+        }
 
         $this->CoJob->Co->Cou->clear();
 
@@ -382,6 +386,16 @@ class XcdbsyncJob extends CoJobBackend {
       $xsedeUsername = $bootstrapInputs[0];
       $wbsNumber = $bootstrapInputs[1];
 
+      // Convert WBS number into COU ID.
+      $couIdMatches = preg_grep("/^WBS $wbsNumber/", $currentCous);
+      if(count($couIdMatches) != 1) {
+        $this->log("ERROR could not convert WBS number $wbsNumber to COU ID for XSEDE username $xsedeUsername");
+        continue;
+      }
+
+      $keys = array_keys($couIdMatches);
+      $couId = array_pop($keys);
+
       // Search to see if this username exists.
       $args = array();
       $args['conditions']['Identifier.identifier'] = $xsedeUsername;
@@ -506,8 +520,6 @@ class XcdbsyncJob extends CoJobBackend {
         }
 
         // Attach a CoPersonRole to the CoPerson.
-        $couId = array_search('WBS ' . $wbsNumber, $currentCous);
-
         $this->CoJob->Co->CoPerson->CoPersonRole->clear();
         
         $data = array();
@@ -550,7 +562,6 @@ class XcdbsyncJob extends CoJobBackend {
       } else {
         // CO Person record already exists so only consider CO Person Roles and create
         // new CO Person Role in the COU if it does not already exist.
-        $newCouId = array_search('WBS ' . $wbsNumber, $currentCous);
 
         // Fetch the CO Person record and existing CO Person Roles.
         $coPersonId = $identifier[0]['Identifier']['co_person_id'];
@@ -565,7 +576,7 @@ class XcdbsyncJob extends CoJobBackend {
         $roleExists = false;
         foreach($coPerson['CoPersonRole'] as $role) {
           $existingCouId = $role['cou_id'];
-          if($existingCouId == $newCouId) {
+          if($existingCouId == $couId) {
             $roleExists = true;
           }
         }
@@ -576,7 +587,7 @@ class XcdbsyncJob extends CoJobBackend {
           $data = array();
           $data['CoPersonRole'] = array();
           $data['CoPersonRole']['co_person_id'] = $coPersonId;
-          $data['CoPersonRole']['cou_id'] = $newCouId;
+          $data['CoPersonRole']['cou_id'] = $couId;
           $data['CoPersonRole']['status'] = StatusEnum::Active;
           $data['CoPersonRole']['affiliation'] = AffiliationEnum::Staff;
 
