@@ -673,8 +673,12 @@ class XcdbsyncJob extends CoJobBackend {
       if(empty($xsedeUsername)) {
         $jobHistoryRecordKey = $coPersonId;
         $jobHistoryComment = "CoPerson record has no XSEDE username";
-        $this->CoJob->CoJobHistoryRecord->record($this->CoJob->id, $jobHistoryRecordKey, $jobHistoryComment, $coPersonId, null, JobStatusEnum::Failed);
-        $failed++;
+        // Now that we have decided to onboard non-staff and as such the CoPerson
+        // record will not have an XSEDE username we will not record this as a
+        // failure.
+        //$this->CoJob->CoJobHistoryRecord->record($this->CoJob->id, $jobHistoryRecordKey, $jobHistoryComment, $coPersonId, null, JobStatusEnum::Failed);
+        $this->CoJob->CoJobHistoryRecord->record($this->CoJob->id, $jobHistoryRecordKey, $jobHistoryComment, $coPersonId, null, JobStatusEnum::Complete);
+        //$failed++;
         continue;
       }
 
